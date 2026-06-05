@@ -23,7 +23,8 @@ export function Header({ onSearchClick, onCartClick, onMenuClick }: HeaderProps)
         </button>
 
         <Link to="/" className="absolute left-1/2 -translate-x-1/2">
-          <div className="tracking-[0.2em] text-sm">ATELIER</div>
+          <div className="tracking-[0.2em] text-sm">House of</div>
+          <div className="tracking-[0.2em] text-sm">MARILA</div>
         </Link>
 
         <div className="flex items-center gap-2">
