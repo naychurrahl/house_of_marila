@@ -1,0 +1,89 @@
+<?php
+
+    class Database {
+
+        private string $host;
+
+        private string $db;
+
+        private string $user;
+
+        private string $pass;
+
+        private string $charset = 'utf8mb4';
+
+        private PDO $pdo;
+
+        private static $instance;
+
+        private function __construct() {
+
+            $keys = include_once str_replace('\\', '/', dirname(__DIR__))."/config/db.php";
+
+            $this -> host = $keys['host'];
+
+            $this -> db = $keys['database'];
+
+            $this -> user = $keys['user'];
+
+            $this -> pass = $keys['password'];
+
+            $dsn = "mysql:host={$this->host};
+
+            dbname={$this->db};
+
+            charset={$this->charset}";
+
+
+            $options = [
+
+                PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION, // Throw exceptions on errors
+
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,       // Fetch associative arrays
+
+                PDO::ATTR_EMULATE_PREPARES   => false,                  // Use native prepares
+
+            ];
+
+
+            try {
+
+                $this->pdo = new PDO($dsn, $this->user, $this->pass, $options);
+
+            } catch (\PDOException $e) {
+
+                http_response_code(500);
+
+                echo json_encode([
+                    'error' => 'Database connection failed',
+                    'message' => $e -> getMEssage()
+                ]);
+
+                exit();
+
+            }
+
+        }
+
+
+        // Singleton pattern: one connection only
+        public static function getInstance(): Database {
+
+            if (! self::$instance) {
+
+                self::$instance = new self();
+
+            }
+
+            return self::$instance;
+
+        }
+
+        //public function getConnection() {
+        public function connect() {
+
+            return $this->pdo;
+
+        }
+
+    }

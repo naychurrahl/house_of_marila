@@ -1,0 +1,1717 @@
+openapi: 3.0.3
+
+info:
+  title: Marila API
+  version: 1.0.0
+  description: |
+    REST API for the Marila storefront (products, collections, articles, locations,
+    cart, wishlist, addresses, orders and Paystack payments) plus an admin/staff
+    back office (staff accounts, site settings, image upload).
+
+    ## Routing
+    There is no `/api` prefix. Every endpoint is `/{route}` or `/{route}/{param}`,
+    rewritten by `.htaccess` to `index.php`, which dispatches on the first path
+    segment (`route`) and HTTP method. A small number of routes read an id/name
+    out of the second path segment instead of the request body (documented
+    per-operation below).
+
+    Request bodies are read from `$_POST` (form-encoded / multipart), else
+    `$_GET` (query string), else a raw JSON body — send `Content-Type:
+    application/json` for anything that isn't a file upload.
+
+    ## Authentication
+    Session state is a custom base64-wrapped HMAC-SHA256 token, issued as an
+    `httpOnly` cookie named `token` on login/register (and refreshed on every
+    authenticated response). The same token is also accepted via
+    `Authorization: Bearer <token>` for non-browser clients. There is no
+    separate refresh endpoint — the cookie is reissued with a rolling 7-day
+    expiry on each authenticated request.
+
+    Three roles exist: `customer`, `staff`, `admin`. Endpoints marked
+    "Requires: staff/admin" or "Requires: admin" return `403 Forbidden` for a
+    logged-in user of the wrong role, and `401 Unauthorized` if not logged in
+    at all.
+  contact:
+    name: Marila backend
+
+servers:
+  - url: '{baseUrl}'
+    description: Backend root (same origin the PHP files are served from — no path prefix)
+    variables:
+      baseUrl:
+        default: https://marila.com
+
+tags:
+  - name: System
+    description: Health check
+  - name: Auth
+    description: Login, registration, logout, password reset
+  - name: Account
+    description: The logged-in user's own profile and password
+  - name: Products
+  - name: Collections
+  - name: Articles
+  - name: Locations
+  - name: Categories
+  - name: Cart
+  - name: Wishlist
+  - name: Addresses
+  - name: Orders
+  - name: Payments
+    description: Paystack public key, webhook and verification
+  - name: Settings
+    description: Site-wide settings (name, tagline, logo, socials)
+  - name: Staff
+    description: Admin/staff account management
+  - name: Upload
+    description: Image upload for product/collection/article/site assets
+
+security:
+  - cookieAuth: []
+  - bearerAuth: []
+
+paths:
+  /ping:
+    get:
+      tags: [System]
+      summary: Health check / session probe
+      description: >
+        Always returns 200. If a valid session cookie/bearer token is present,
+        echoes the logged-in user; otherwise reports status "out". Any HTTP
+        method is accepted.
+      security: []
+      responses:
+        '200':
+          description: Pong
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PingAuthenticated'
+                  - $ref: '#/components/schemas/PingAnonymous'
+
+  /auth:
+    get:
+      tags: [Auth]
+      summary: Session probe (alias of GET /ping)
+      security: []
+      responses:
+        '200':
+          description: Pong
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PingAuthenticated'
+                  - $ref: '#/components/schemas/PingAnonymous'
+    post:
+      tags: [Auth]
+      summary: Log in
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Logged in. Sets the `token` session cookie.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid email or password
+          content:
+            application/json:
+              schema:
+                type: string
+                example: Invalid email or password
+        '500':
+          $ref: '#/components/responses/ServerError'
+    delete:
+      tags: [Auth]
+      summary: Log out
+      description: Clears the session cookie. No response body is guaranteed.
+      responses:
+        '200':
+          description: Logged out
+
+  /user:
+    post:
+      tags: [Auth]
+      summary: Register a new customer account
+      description: Creates a `customer`-role user and logs them in immediately (sets the session cookie).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                name:
+                  type: string
+                password:
+                  type: string
+                  format: password
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/MissingFields'
+        '409':
+          description: Email already in use
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /forgot:
+    post:
+      tags: [Auth]
+      summary: Request a password reset code
+      description: >
+        Always returns 200 with the same message whether or not the email is
+        registered (prevents account enumeration). A 6-digit code is emailed
+        via SMTP and expires in 15 minutes; if SMTP isn't configured, the code
+        is also returned as `devCode` in the response so local testing isn't
+        blocked.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: Reset code issued (if the account exists)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: If that email is registered, a reset code has been sent.
+                  devCode:
+                    type: string
+                    description: Only present when the account exists (fallback while SMTP is unconfigured)
+                    example: '482913'
+
+  /reset:
+    post:
+      tags: [Auth]
+      summary: Reset password using the emailed/dev code
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code, newPassword]
+              properties:
+                email:
+                  type: string
+                  format: email
+                code:
+                  type: string
+                  example: '482913'
+                newPassword:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Password reset
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Password reset successfully
+        '401':
+          description: Invalid or expired code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+
+  /password:
+    put:
+      tags: [Account]
+      summary: Change password (while logged in)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword:
+                  type: string
+                  format: password
+                newPassword:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Password changed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  updated: { type: boolean }
+        '401':
+          description: Not authenticated, or current password incorrect
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+
+  /profile:
+    get:
+      tags: [Account]
+      summary: Get the logged-in user's profile
+      responses:
+        '200':
+          description: Profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      tags: [Account]
+      summary: Update the logged-in user's profile
+      description: Only `name` is editable — email is immutable once the account exists.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  updated: { type: boolean }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /product:
+    get:
+      tags: [Products]
+      summary: List products
+      security: []
+      parameters:
+        - name: category
+          in: query
+          schema: { type: string }
+          description: Filter by category name. `All` (or omitted) returns every category.
+        - name: collectionId
+          in: query
+          schema: { type: string }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [price-low, price-high]
+          description: Defaults to newest-first (`created_at DESC`) when omitted.
+      responses:
+        '200':
+          description: Product list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Product'
+    post:
+      tags: [Products]
+      summary: Create a product
+      description: 'Requires: staff/admin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductInput'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/MissingFields'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: A product with that name already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+    put:
+      tags: [Products]
+      summary: Update a product
+      description: 'Requires: staff/admin. The product id is in the body, not the path. `sizes`/`colors`/`tags`/`images` fully replace the existing set when supplied.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - type: object
+                  required: [id]
+                  properties:
+                    id: { type: string }
+                - $ref: '#/components/schemas/ProductInput'
+      responses:
+        '200':
+          description: Updated product
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '400':
+          $ref: '#/components/responses/MissingFields'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Product not found
+        '409':
+          description: A product with that name already exists
+
+  /product/{id}:
+    get:
+      tags: [Products]
+      summary: Get a product by id
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/PathId'
+      responses:
+        '200':
+          description: Product
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+        '404':
+          description: Product not found
+    delete:
+      tags: [Products]
+      summary: Delete a product
+      description: 'Requires: staff/admin'
+      parameters:
+        - $ref: '#/components/parameters/PathId'
+      responses:
+        '200':
+          description: Deletion result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /collection:
+    get:
+      tags: [Collections]
+      summary: List collections
+      security: []
+      responses:
+        '200':
+          description: Collections, newest year first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Collection'
+    post:
+      tags: [Collections]
+      summary: Create a collection
+      description: 'Requires: staff/admin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CollectionInput'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collection'
+        '400':
+          $ref: '#/components/responses/MissingFields'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      tags: [Collections]
+      summary: Update a collection
+      description: 'Requires: staff/admin. The collection id is in the body. `images` fully replaces the gallery when supplied.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - type: object
+                  required: [id]
+                  properties:
+                    id: { type: string }
+                - $ref: '#/components/schemas/CollectionInput'
+      responses:
+        '200':
+          description: Updated collection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collection'
+        '400':
+          $ref: '#/components/responses/MissingFields'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /collection/{id}:
+    get:
+      tags: [Collections]
+      summary: Get a collection by id
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/PathId'
+      responses:
+        '200':
+          description: Collection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collection'
+        '404':
+          description: Collection not found
+    delete:
+      tags: [Collections]
+      summary: Delete a collection
+      description: 'Requires: staff/admin'
+      parameters:
+        - $ref: '#/components/parameters/PathId'
+      responses:
+        '200':
+          description: Deletion result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /article:
+    get:
+      tags: [Articles]
+      summary: List journal articles
+      security: []
+      responses:
+        '200':
+          description: Articles, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Article'
+    post:
+      tags: [Articles]
+      summary: Create an article
+      description: 'Requires: staff/admin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ArticleInput'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Article'
+        '400':
+          $ref: '#/components/responses/MissingFields'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      tags: [Articles]
+      summary: Update an article
+      description: 'Requires: staff/admin. The article id is in the body. `images` fully replaces the gallery when supplied.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - type: object
+                  required: [id]
+                  properties:
+                    id: { type: string }
+                - $ref: '#/components/schemas/ArticleInput'
+      responses:
+        '200':
+          description: Updated article
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Article'
+        '400':
+          $ref: '#/components/responses/MissingFields'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /article/{id}:
+    get:
+      tags: [Articles]
+      summary: Get an article by id
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/PathId'
+      responses:
+        '200':
+          description: Article
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Article'
+        '404':
+          description: Article not found
+    delete:
+      tags: [Articles]
+      summary: Delete an article
+      description: 'Requires: staff/admin'
+      parameters:
+        - $ref: '#/components/parameters/PathId'
+      responses:
+        '200':
+          description: Deletion result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /location:
+    get:
+      tags: [Locations]
+      summary: List store locations
+      security: []
+      responses:
+        '200':
+          description: Locations, alphabetical
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Location'
+    post:
+      tags: [Locations]
+      summary: Create a location
+      description: 'Requires: staff/admin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LocationInput'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Location'
+        '400':
+          $ref: '#/components/responses/MissingFields'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      tags: [Locations]
+      summary: Update a location
+      description: 'Requires: staff/admin. The location id is in the body.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - type: object
+                  required: [id]
+                  properties:
+                    id: { type: string }
+                - $ref: '#/components/schemas/LocationInput'
+      responses:
+        '200':
+          description: Update result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateResult'
+        '400':
+          $ref: '#/components/responses/MissingFields'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /location/{id}:
+    delete:
+      tags: [Locations]
+      summary: Delete a location
+      description: 'Requires: staff/admin'
+      parameters:
+        - $ref: '#/components/parameters/PathId'
+      responses:
+        '200':
+          description: Deletion result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /category:
+    get:
+      tags: [Categories]
+      summary: List category names
+      security: []
+      responses:
+        '200':
+          description: Category names, alphabetical
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+    post:
+      tags: [Categories]
+      summary: Create a category
+      description: 'Requires: staff/admin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+        '400':
+          $ref: '#/components/responses/MissingFields'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: That category already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+
+  /category/{name}:
+    delete:
+      tags: [Categories]
+      summary: Delete a category
+      description: 'Requires: staff/admin'
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Deletion result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  deleted: { type: boolean }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Category is still in use by one or more products
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+
+  /cart:
+    get:
+      tags: [Cart]
+      summary: Get the logged-in user's cart
+      responses:
+        '200':
+          description: Cart items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CartItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Cart]
+      summary: Add an item to the cart
+      description: If the same product/size/color combination is already in the cart, quantity is added to the existing row.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CartItem'
+      responses:
+        '200':
+          description: Item added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CartItem'
+        '400':
+          $ref: '#/components/responses/MissingFields'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      tags: [Cart]
+      summary: Set an item's quantity
+      description: Setting quantity below 1 removes the item instead of updating it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CartItem'
+      responses:
+        '200':
+          description: Updated (or removed, if quantity < 1)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  productId: { type: string }
+                  quantity: { type: integer }
+                  updated: { type: boolean }
+                  removed: { type: boolean }
+        '400':
+          $ref: '#/components/responses/MissingFields'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    delete:
+      tags: [Cart]
+      summary: Remove an item from the cart, or clear it entirely
+      description: Omit `productId` to clear the whole cart.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                productId: { type: string, description: 'Omit to clear the entire cart' }
+                size: { type: string }
+                color: { type: string }
+      responses:
+        '200':
+          description: Removal result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cleared: { type: boolean }
+                  productId: { type: string }
+                  removed: { type: boolean }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /wishlist:
+    get:
+      tags: [Wishlist]
+      summary: Get the logged-in user's wishlist
+      responses:
+        '200':
+          description: Product ids
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Wishlist]
+      summary: Add a product to the wishlist
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [productId]
+              properties:
+                productId: { type: string }
+      responses:
+        '200':
+          description: Added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  productId: { type: string }
+                  added: { type: boolean }
+        '400':
+          $ref: '#/components/responses/MissingFields'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /wishlist/{productId}:
+    delete:
+      tags: [Wishlist]
+      summary: Remove a product from the wishlist
+      description: '`productId` may be given as the path segment or as a `productId` body field.'
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Removal result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  productId: { type: string }
+                  removed: { type: boolean }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /address:
+    get:
+      tags: [Addresses]
+      summary: List the logged-in user's addresses
+      description: Default address first, then newest first.
+      responses:
+        '200':
+          description: Addresses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Address'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Addresses]
+      summary: Add an address
+      description: "Setting `isDefault: true` unsets any previous default for this user."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddressInput'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Address'
+        '400':
+          $ref: '#/components/responses/MissingFields'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      tags: [Addresses]
+      summary: Update an address
+      description: The address id is in the body. Only addresses owned by the caller can be updated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - type: object
+                  required: [id]
+                  properties:
+                    id: { type: string }
+                - $ref: '#/components/schemas/AddressInput'
+      responses:
+        '200':
+          description: Update result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateResult'
+        '400':
+          $ref: '#/components/responses/MissingFields'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /address/{id}:
+    delete:
+      tags: [Addresses]
+      summary: Delete an address
+      description: Only an address owned by the caller can be deleted.
+      parameters:
+        - $ref: '#/components/parameters/PathId'
+      responses:
+        '200':
+          description: Deletion result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /orders:
+    get:
+      tags: [Orders]
+      summary: List orders
+      description: Customers see only their own orders; staff/admin see every order.
+      responses:
+        '200':
+          description: Orders, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Orders]
+      summary: Place an order from the current cart
+      description: >
+        Builds the order from the caller's current cart contents; prices are
+        taken from the `products` table server-side (never from the client).
+        Clears the cart on success. Does not itself talk to Paystack — the
+        frontend opens the inline Paystack popup using the returned order id
+        as the payment reference, then calls `GET /payment/{reference}` to
+        verify.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                addressId:
+                  type: string
+                  description: Must belong to the caller if provided
+      responses:
+        '201':
+          description: Order created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          description: Cart is empty
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Address not found
+        '500':
+          $ref: '#/components/responses/ServerError'
+    put:
+      tags: [Orders]
+      summary: Update order status
+      description: 'Requires: staff/admin. The order id is in the body.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string }
+                status:
+                  type: string
+                  example: shipped
+      responses:
+        '200':
+          description: Update result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateResult'
+        '400':
+          $ref: '#/components/responses/MissingFields'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /orders/{id}:
+    get:
+      tags: [Orders]
+      summary: Get an order by id
+      description: Customers may only fetch their own order; staff/admin may fetch any.
+      parameters:
+        - $ref: '#/components/parameters/PathId'
+      responses:
+        '200':
+          description: Order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Order not found
+
+  /paystack-key:
+    get:
+      tags: [Payments]
+      summary: Get the Paystack public key
+      description: Used by the frontend to initialize the inline Paystack popup. Any HTTP method is accepted.
+      security: []
+      responses:
+        '200':
+          description: Public key
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    example: pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+  /payment/{reference}:
+    get:
+      tags: [Payments]
+      summary: Verify a payment against Paystack and sync order status
+      description: >
+        Calls Paystack's `transaction/verify` REST API server-side and updates
+        `orders.payment_status` accordingly. A customer may only verify their
+        own order; staff/admin may verify any. `reference` is the order id and
+        may be given as the path segment or a `reference` body/query field.
+        Any HTTP method is accepted.
+      parameters:
+        - name: reference
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Order with gateway status
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Order'
+                  - type: object
+                    properties:
+                      gatewayStatus:
+                        type: string
+                        example: success
+        '400':
+          description: reference is required
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Order not found
+        '502':
+          description: Could not reach Paystack to verify payment
+
+  /payhook:
+    post:
+      tags: [Payments]
+      summary: Paystack webhook
+      description: >
+        Called by Paystack, not by the frontend. Verifies the
+        `x-paystack-signature` header as `HMAC-SHA512(rawBody, PAYSTACK_SECRET_KEY)`
+        before trusting the payload. On a `charge.success` event, updates the
+        matching order's `payment_status`. Not session-authenticated — the
+        signature check is the auth for this endpoint.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Raw Paystack event payload
+      parameters:
+        - name: x-paystack-signature
+          in: header
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Event processed
+        '400':
+          description: Invalid signature
+
+  /settings:
+    get:
+      tags: [Settings]
+      summary: Get site settings
+      security: []
+      responses:
+        '200':
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+    put:
+      tags: [Settings]
+      summary: Update site settings
+      description: 'Requires: admin'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Settings'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated: { type: boolean }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /staff:
+    get:
+      tags: [Staff]
+      summary: List staff and admin accounts
+      description: 'Requires: admin'
+      responses:
+        '200':
+          description: Staff/admin users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StaffUser'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Staff]
+      summary: Create a staff or admin account
+      description: 'Requires: admin'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                name: { type: string }
+                password: { type: string, format: password }
+                role:
+                  type: string
+                  enum: [staff, admin]
+                  default: staff
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  email: { type: string }
+                  role: { type: string }
+        '400':
+          $ref: '#/components/responses/MissingFields'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Email already in use
+
+  /staff/{id}:
+    delete:
+      tags: [Staff]
+      summary: Deactivate a staff/admin account
+      description: 'Requires: admin. This is a soft delete — sets `active = ''inactive''`, it does not remove the row.'
+      parameters:
+        - $ref: '#/components/parameters/PathId'
+      responses:
+        '200':
+          description: Deactivation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  deactivated: { type: boolean }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /upload:
+    post:
+      tags: [Upload]
+      summary: Upload an image
+      description: 'Requires: staff/admin. Multipart form upload, 5MB max, jpeg/png/webp/gif only.'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [folder, image]
+              properties:
+                folder:
+                  type: string
+                  enum: [products, collections, articles, site]
+                image:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    format: uri
+                    example: https://marila.com/uploads/products/3f1a...c2.jpg
+        '400':
+          description: Invalid folder, no file, wrong type, or file too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorMessage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          description: Failed to save image
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: token
+      description: httpOnly session cookie set on login/register, refreshed on every authenticated response.
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: "Same token as the `token` cookie, for non-browser clients. Send as `Authorization: Bearer <token>`."
+
+  parameters:
+    PathId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+
+  responses:
+    Unauthorized:
+      description: Not logged in
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorMessage'
+          example:
+            error: Unauthorized
+    Forbidden:
+      description: Logged in, but wrong role for this action
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorMessage'
+          example:
+            error: Forbidden
+    MissingFields:
+      description: One or more required fields were missing/blank
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorMessage'
+          example:
+            error: 'Missing fields: name, price'
+    ServerError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorMessage'
+
+  schemas:
+    ErrorMessage:
+      type: object
+      properties:
+        error:
+          type: string
+
+    PingAnonymous:
+      type: object
+      properties:
+        status: { type: string, example: out }
+        timestamp: { type: integer }
+        message: { type: string, example: pong }
+
+    PingAuthenticated:
+      type: object
+      properties:
+        status: { type: string, example: in }
+        timestamp: { type: integer }
+        message: { type: string, example: pong }
+        user:
+          $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      properties:
+        id: { type: string, example: cust_a1b2c3 }
+        name: { type: string, nullable: true }
+        email: { type: string, format: email }
+        role: { type: string, enum: [customer, staff, admin] }
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        token:
+          type: string
+          description: Also set as the httpOnly `token` cookie; included here for non-browser clients.
+
+    DeleteResult:
+      type: object
+      properties:
+        id: { type: string }
+        deleted: { type: boolean }
+
+    UpdateResult:
+      type: object
+      properties:
+        id: { type: string }
+        updated: { type: boolean }
+
+    Product:
+      type: object
+      properties:
+        id: { type: string, example: prod_a1b2c3 }
+        name: { type: string }
+        price: { type: number, format: float }
+        category: { type: string }
+        description: { type: string }
+        images:
+          type: array
+          items: { type: string, format: uri }
+        sizes:
+          type: array
+          items: { type: string }
+        colors:
+          type: array
+          items: { type: string }
+        inStock: { type: boolean }
+        tags:
+          type: array
+          items: { type: string }
+        collectionId: { type: string, nullable: true }
+
+    ProductInput:
+      type: object
+      properties:
+        name: { type: string }
+        price: { type: number, format: float }
+        category: { type: string }
+        description: { type: string }
+        inStock: { type: boolean, default: true }
+        collectionId: { type: string, nullable: true }
+        images:
+          type: array
+          items: { type: string, format: uri }
+        sizes:
+          type: array
+          items: { type: string }
+        colors:
+          type: array
+          items: { type: string }
+        tags:
+          type: array
+          items: { type: string }
+      required: [name, price, category]
+
+    Collection:
+      type: object
+      properties:
+        id: { type: string, example: col_a1b2c3 }
+        name: { type: string }
+        description: { type: string }
+        season: { type: string }
+        year: { type: string }
+        coverImage: { type: string, format: uri }
+        images:
+          type: array
+          items: { type: string, format: uri }
+        story: { type: string }
+        productIds:
+          type: array
+          items: { type: string }
+
+    CollectionInput:
+      type: object
+      required: [name, description, season, year, coverImage, story]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        season: { type: string }
+        year: { type: string }
+        coverImage: { type: string, format: uri }
+        story: { type: string }
+        images:
+          type: array
+          items: { type: string, format: uri }
+
+    Article:
+      type: object
+      properties:
+        id: { type: string, example: art_a1b2c3 }
+        title: { type: string }
+        excerpt: { type: string }
+        content: { type: string }
+        author: { type: string }
+        date: { type: string, format: date }
+        category: { type: string }
+        coverImage: { type: string, format: uri }
+        images:
+          type: array
+          items: { type: string, format: uri }
+
+    ArticleInput:
+      type: object
+      required: [title, excerpt, content, author, category, coverImage]
+      properties:
+        title: { type: string }
+        excerpt: { type: string }
+        content: { type: string }
+        author: { type: string }
+        date: { type: string, format: date, description: Defaults to today if omitted }
+        category: { type: string }
+        coverImage: { type: string, format: uri }
+        images:
+          type: array
+          items: { type: string, format: uri }
+
+    Location:
+      type: object
+      properties:
+        id: { type: string, example: loc_a1b2c3 }
+        name: { type: string }
+        address: { type: string }
+        city: { type: string }
+        hours: { type: string }
+        phone: { type: string }
+
+    LocationInput:
+      type: object
+      required: [name, address, city, hours, phone]
+      properties:
+        name: { type: string }
+        address: { type: string }
+        city: { type: string }
+        hours: { type: string }
+        phone: { type: string }
+
+    CartItem:
+      type: object
+      required: [productId, size, color, quantity]
+      properties:
+        productId: { type: string }
+        size: { type: string }
+        color: { type: string }
+        quantity: { type: integer, minimum: 1 }
+
+    Address:
+      type: object
+      properties:
+        id: { type: string, example: addr_a1b2c3 }
+        name: { type: string }
+        street: { type: string }
+        city: { type: string }
+        state: { type: string }
+        zip: { type: string }
+        country: { type: string }
+        isDefault: { type: boolean }
+
+    AddressInput:
+      type: object
+      required: [name, street, city, state, zip, country]
+      properties:
+        name: { type: string }
+        street: { type: string }
+        city: { type: string }
+        state: { type: string }
+        zip: { type: string }
+        country: { type: string }
+        isDefault: { type: boolean, default: false }
+
+    OrderItem:
+      type: object
+      properties:
+        productId: { type: string }
+        size: { type: string }
+        color: { type: string }
+        quantity: { type: integer }
+
+    Order:
+      type: object
+      properties:
+        id: { type: string, example: ord_a1b2c3 }
+        userId: { type: string }
+        date: { type: string, format: date-time }
+        status: { type: string, example: pending }
+        paymentStatus: { type: string, example: pending, enum: [pending, success, failed] }
+        subtotal: { type: number, format: float }
+        shipping: { type: number, format: float }
+        tax: { type: number, format: float }
+        total: { type: number, format: float }
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+
+    Settings:
+      type: object
+      properties:
+        name: { type: string }
+        tagline: { type: string }
+        logo: { type: string, format: uri }
+        instagram: { type: string }
+        twitter: { type: string }
+        pinterest: { type: string }
+
+    StaffUser:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string, nullable: true }
+        email: { type: string, format: email }
+        role: { type: string, enum: [staff, admin] }
+        active: { type: string, enum: [active, inactive] }
