@@ -1,12 +1,17 @@
 import { useParams, Link } from 'react-router';
-import { collections, products } from '@/app/data/mockData';
+import { useApp } from '@/app/context/AppContext';
 import { ProductGrid } from '@/app/components/products/ProductGrid';
 import { useState } from 'react';
 
 export function CollectionDetailPage() {
   const { id } = useParams();
+  const { collections, products, catalogReady } = useApp();
   const collection = collections.find(c => c.id === id);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+
+  if (!catalogReady) {
+    return <div className="pt-14 min-h-screen" />;
+  }
 
   if (!collection) {
     return (

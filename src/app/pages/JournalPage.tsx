@@ -1,7 +1,8 @@
-import { articles } from '@/app/data/mockData';
+import { useApp } from '@/app/context/AppContext';
 import { ArticleCard } from '@/app/components/content/ArticleCard';
 
 export function JournalPage() {
+  const { articles } = useApp();
   const featuredArticle = articles[0];
   const otherArticles = articles.slice(1);
 
@@ -14,9 +15,11 @@ export function JournalPage() {
         </p>
 
         {/* Featured Article */}
-        <div className="mb-16">
-          <ArticleCard article={featuredArticle} variant="large" />
-        </div>
+        {featuredArticle && (
+          <div className="mb-16">
+            <ArticleCard article={featuredArticle} variant="large" />
+          </div>
+        )}
 
         {/* Other Articles */}
         <div className="grid grid-cols-1 gap-12">

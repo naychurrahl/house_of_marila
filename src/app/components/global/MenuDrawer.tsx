@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
 import { Link } from 'react-router';
 import { motion, AnimatePresence } from 'motion/react';
+import { useApp } from '@/app/context/AppContext';
 
 interface MenuDrawerProps {
   isOpen: boolean;
@@ -8,6 +9,8 @@ interface MenuDrawerProps {
 }
 
 export function MenuDrawer({ isOpen, onClose }: MenuDrawerProps) {
+  const { user, settings } = useApp();
+
   const menuLinks = [
     { label: 'Home', to: '/' },
     { label: 'Collections', to: '/collections' },
@@ -16,6 +19,7 @@ export function MenuDrawer({ isOpen, onClose }: MenuDrawerProps) {
     { label: 'Account', to: '/account' },
     { label: 'Contact', to: '/contact' },
     { label: 'Store Locator', to: '/stores' },
+    ...(user?.role === 'admin' || user?.role === 'staff' ? [{ label: 'Admin', to: '/admin' }] : []),
   ];
 
   return (
@@ -58,11 +62,19 @@ export function MenuDrawer({ isOpen, onClose }: MenuDrawerProps) {
 
             <div className="p-6 border-t border-neutral-200">
               <div className="flex gap-4 mb-4">
-                <a href="#" className="text-sm hover:underline">Instagram</a>
-                <a href="#" className="text-sm hover:underline">Twitter</a>
-                <a href="#" className="text-sm hover:underline">Pinterest</a>
+                {settings?.instagram && (
+                  <a href={settings.instagram} target="_blank" rel="noreferrer" className="text-sm hover:underline">Instagram</a>
+                )}
+                {settings?.twitter && (
+                  <a href={settings.twitter} target="_blank" rel="noreferrer" className="text-sm hover:underline">Twitter</a>
+                )}
+                {settings?.pinterest && (
+                  <a href={settings.pinterest} target="_blank" rel="noreferrer" className="text-sm hover:underline">Pinterest</a>
+                )}
               </div>
-              <p className="text-xs text-neutral-500">© 2026 Atelier. All rights reserved.</p>
+              <p className="text-xs text-neutral-500">
+                © {new Date().getFullYear()} {settings?.name ?? 'Marila'}. All rights reserved.
+              </p>
             </div>
           </motion.div>
         </>

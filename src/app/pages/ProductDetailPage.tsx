@@ -1,19 +1,24 @@
 import { useState } from 'react';
-import { useParams, Link } from 'react-router';
-import { products } from '@/app/data/mockData';
-import { useCart } from '@/app/context/CartContext';
+import { useParams, Link, useNavigate } from 'react-router';
+import { useApp } from '@/app/context/AppContext';
 import { Heart, Check } from 'lucide-react';
 import { ProductGrid } from '@/app/components/products/ProductGrid';
 
 export function ProductDetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
+  const { products, catalogReady, user, addToCart, wishlist, toggleWishlist } = useApp();
   const product = products.find(p => p.id === id);
-  const { addToCart, wishlist, toggleWishlist } = useCart();
 
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [selectedSize, setSelectedSize] = useState('');
   const [selectedColor, setSelectedColor] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
+  const [error, setError] = useState('');
+
+  if (!catalogReady) {
+    return <div className="pt-14 min-h-screen" />;
+  }
 
   if (!product) {
     return (
@@ -33,21 +38,31 @@ export function ProductDetailPage() {
     .filter(p => p.category === product.category && p.id !== product.id)
     .slice(0, 4);
 
-  const handleAddToCart = () => {
+  const handleAddToCart = async () => {
     if (!selectedSize || !selectedColor) {
-      alert('Please select size and color');
+      setError('Please select size and color');
       return;
     }
 
-    addToCart({
-      productId: product.id,
-      size: selectedSize,
-      color: selectedColor,
-      quantity: 1,
-    });
+    if (!user) {
+      navigate('/account');
+      return;
+    }
 
-    setShowSuccess(true);
-    setTimeout(() => setShowSuccess(false), 2000);
+    try {
+      setError('');
+      await addToCart({
+        productId: product.id,
+        size: selectedSize,
+        color: selectedColor,
+        quantity: 1,
+      });
+
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add to cart');
+    }
   };
 
   return (
@@ -155,6 +170,10 @@ export function ProductDetailPage() {
         >
           {product.inStock ? 'ADD TO CART' : 'OUT OF STOCK'}
         </button>
+
+        {error && (
+          <div className="py-3 text-center text-sm text-red-700 bg-red-50 mb-4">{error}</div>
+        )}
 
         {showSuccess && (
           <div className="flex items-center justify-center gap-2 py-3 bg-green-50 text-green-800 text-sm mb-4">

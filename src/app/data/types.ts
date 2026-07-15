@@ -45,8 +45,13 @@ export interface CartItem {
 
 export interface Order {
   id: string;
+  userId: string;
   date: string;
   status: 'processing' | 'shipped' | 'delivered';
+  paymentStatus: 'pending' | 'success' | 'failed';
+  subtotal: number;
+  shipping: number;
+  tax: number;
   total: number;
   items: CartItem[];
 }
@@ -69,4 +74,28 @@ export interface Location {
   city: string;
   hours: string;
   phone: string;
+}
+
+export interface User {
+  id: string;
+  name: string | null;
+  email: string;
+  role: 'guest' | 'customer' | 'staff' | 'admin';
+}
+
+export interface SiteSettings {
+  name: string;
+  tagline: string | null;
+  logo: string | null;
+  instagram: string | null;
+  twitter: string | null;
+  pinterest: string | null;
+}
+
+export interface Staff {
+  id: string;
+  name: string | null;
+  email: string;
+  role: 'admin' | 'staff';
+  active: 'active' | 'inactive';
 }

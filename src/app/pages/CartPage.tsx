@@ -1,15 +1,11 @@
-import { useCart } from '@/app/context/CartContext';
-import { products } from '@/app/data/mockData';
+import { useApp } from '@/app/context/AppContext';
 import { Link } from 'react-router';
 import { Plus, Minus } from 'lucide-react';
 
 export function CartPage() {
-  const { cartItems, removeFromCart, updateQuantity } = useCart();
+  const { cartItems, removeFromCart, updateQuantity, products, cartTotal } = useApp();
 
-  const total = cartItems.reduce((sum, item) => {
-    const product = products.find(p => p.id === item.productId);
-    return sum + (product?.price || 0) * item.quantity;
-  }, 0);
+  const total = cartTotal;
 
   if (cartItems.length === 0) {
     return (

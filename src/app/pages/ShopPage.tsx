@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { products } from '@/app/data/mockData';
+import { useApp } from '@/app/context/AppContext';
 import { ProductGrid } from '@/app/components/products/ProductGrid';
 import { SlidersHorizontal } from 'lucide-react';
 
 export function ShopPage() {
+  const { products } = useApp();
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [sortBy, setSortBy] = useState<string>('newest');
 

@@ -1,7 +1,9 @@
-import { collections } from '@/app/data/mockData';
+import { useApp } from '@/app/context/AppContext';
 import { CollectionCard } from '@/app/components/showroom/CollectionCard';
 
 export function CollectionsPage() {
+  const { collections } = useApp();
+
   return (
     <div className="pt-14 min-h-screen">
       <div className="py-12 px-4">

@@ -2,21 +2,25 @@ import { HeroCampaign } from '@/app/components/showroom/HeroCampaign';
 import { CollectionRail } from '@/app/components/showroom/CollectionRail';
 import { ProductGrid } from '@/app/components/products/ProductGrid';
 import { ArticleCard } from '@/app/components/content/ArticleCard';
-import { collections, products, articles } from '@/app/data/mockData';
+import { useApp } from '@/app/context/AppContext';
 import { Link } from 'react-router';
 
 export function HomePage() {
+  const { collections, products, articles } = useApp();
   const featuredProducts = products.filter(p => p.tags.includes('New Arrival')).slice(0, 4);
   const featuredArticle = articles[0];
+  const heroCollection = collections[0];
 
   return (
     <div className="pt-14">
-      <HeroCampaign
-        title="Spring/Summer 2026"
-        subtitle="Available Now"
-        image={collections[0].coverImage}
-        link={`/collections/${collections[0].id}`}
-      />
+      {heroCollection && (
+        <HeroCampaign
+          title="Spring/Summer 2026"
+          subtitle="Available Now"
+          image={heroCollection.coverImage}
+          link={`/collections/${heroCollection.id}`}
+        />
+      )}
 
       <CollectionRail title="Collections" collections={collections} />
 
@@ -30,20 +34,22 @@ export function HomePage() {
         <ProductGrid products={featuredProducts} />
       </section>
 
-      <section className="py-12">
-        <div className="px-4 mb-6">
-          <h2 className="text-2xl tracking-tight">From The Journal</h2>
-        </div>
-        <ArticleCard article={featuredArticle} variant="large" />
-        <div className="mt-6 text-center">
-          <Link
-            to="/journal"
-            className="inline-block bg-black text-white px-8 py-3 text-sm tracking-wide hover:bg-neutral-800 transition-colors"
-          >
-            READ MORE
-          </Link>
-        </div>
-      </section>
+      {featuredArticle && (
+        <section className="py-12">
+          <div className="px-4 mb-6">
+            <h2 className="text-2xl tracking-tight">From The Journal</h2>
+          </div>
+          <ArticleCard article={featuredArticle} variant="large" />
+          <div className="mt-6 text-center">
+            <Link
+              to="/journal"
+              className="inline-block bg-black text-white px-8 py-3 text-sm tracking-wide hover:bg-neutral-800 transition-colors"
+            >
+              READ MORE
+            </Link>
+          </div>
+        </section>
+      )}
 
       <section className="py-16 bg-black text-white">
         <div className="px-4 text-center max-w-md mx-auto">

@@ -1,7 +1,9 @@
-import { locations } from '@/app/data/mockData';
+import { useApp } from '@/app/context/AppContext';
 import { MapPin, Phone, Clock } from 'lucide-react';
 
 export function StoreLocatorPage() {
+  const { locations } = useApp();
+
   return (
     <div className="pt-14 min-h-screen">
       <div className="py-12 px-4 max-w-4xl mx-auto">
