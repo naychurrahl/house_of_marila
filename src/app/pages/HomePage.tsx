@@ -2,6 +2,7 @@ import { HeroCampaign } from '@/app/components/showroom/HeroCampaign';
 import { CollectionRail } from '@/app/components/showroom/CollectionRail';
 import { ProductGrid } from '@/app/components/products/ProductGrid';
 import { ArticleCard } from '@/app/components/content/ArticleCard';
+import { TestimonialsCarousel } from '@/app/components/showroom/TestimonialsCarousel';
 import { useApp } from '@/app/context/AppContext';
 import { Link } from 'react-router';
 
@@ -25,33 +26,37 @@ export function HomePage() {
       <CollectionRail title="Collections" collections={collections} />
 
       <section className="py-12 bg-neutral-50">
-        <div className="px-4 mb-6 flex items-center justify-between">
-          <h2 className="text-2xl tracking-tight">New Arrivals</h2>
-          <Link to="/shop" className="text-sm underline">
-            Shop All
-          </Link>
+        <div className="max-w-[1440px] mx-auto">
+          <div className="px-4 mb-6 flex items-center justify-between">
+            <h2 className="text-2xl tracking-tight">New Arrivals</h2>
+            <Link to="/shop" className="text-sm underline">
+              Shop All
+            </Link>
+          </div>
+          <ProductGrid products={featuredProducts} />
         </div>
-        <ProductGrid products={featuredProducts} />
       </section>
 
       {featuredArticle && (
         <section className="py-12">
-          <div className="px-4 mb-6">
-            <h2 className="text-2xl tracking-tight">From The Journal</h2>
-          </div>
-          <ArticleCard article={featuredArticle} variant="large" />
-          <div className="mt-6 text-center">
-            <Link
-              to="/journal"
-              className="inline-block bg-black text-white px-8 py-3 text-sm tracking-wide hover:bg-neutral-800 transition-colors"
-            >
-              READ MORE
-            </Link>
+          <div className="max-w-[1440px] mx-auto">
+            <div className="px-4 mb-6">
+              <h2 className="text-2xl tracking-tight">From The Journal</h2>
+            </div>
+            <ArticleCard article={featuredArticle} variant="large" />
+            <div className="mt-6 text-center">
+              <Link
+                to="/journal"
+                className="inline-block bg-black text-white px-8 py-3 text-sm tracking-wide hover:bg-neutral-800 transition-colors"
+              >
+                READ MORE
+              </Link>
+            </div>
           </div>
         </section>
       )}
 
-      <section className="py-16 bg-black text-white">
+      <section className="py-16 bg-black text-white max-w-[1440px] mx-auto">
         <div className="px-4 text-center max-w-md mx-auto">
           <h2 className="text-2xl mb-4 tracking-tight">Stay Connected</h2>
           <p className="text-sm text-white/80 mb-6">
@@ -72,6 +77,8 @@ export function HomePage() {
           </form>
         </div>
       </section>
+
+      <TestimonialsCarousel />
     </div>
   );
 }

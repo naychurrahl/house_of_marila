@@ -23,7 +23,7 @@ export function ShopPage() {
 
   return (
     <div className="pt-14 min-h-screen">
-      <div className="py-8 px-4">
+      <div className="py-8 px-4 max-w-[1440px] mx-auto">
         <h1 className="text-4xl mb-8 tracking-tight">Shop</h1>
 
         {/* Filters */}

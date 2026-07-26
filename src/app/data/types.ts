@@ -99,3 +99,36 @@ export interface Staff {
   role: 'admin' | 'staff';
   active: 'active' | 'inactive';
 }
+
+export interface ChatMessage {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  senderRole: 'customer' | 'staff' | 'admin';
+  body: string;
+  createdAt: string;
+}
+
+export interface ChatConversationSummary {
+  id: string;
+  userId: string;
+  userName: string | null;
+  userEmail: string;
+  claimedBy: string | null;
+  lastMessage: string | null;
+  lastMessageAt: string | null;
+  unreadCount: number;
+}
+
+export type ReviewSubjectType = 'product' | 'collection' | 'site';
+
+export interface Review {
+  id: string;
+  userId: string;
+  userName: string | null;
+  subjectType: ReviewSubjectType;
+  subjectId: string;
+  rating: number;
+  comment: string;
+  createdAt: string;
+}

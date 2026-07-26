@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import {
   CartItem, Product, Collection, Article, Location, Order, User, Address,
-  SiteSettings, Staff,
+  SiteSettings, Staff, ChatMessage, ChatConversationSummary, Review, ReviewSubjectType,
 } from '@/app/data/types';
-import { ApiRequest, baseUrl } from '@/app/context/ApiRequest';
+import { ApiRequest, baseUrl, setToken, clearToken } from '@/app/context/ApiRequest';
 
 type NewAddress = Omit<Address, 'id'>;
 type NewProduct = Omit<Product, 'id'>;
@@ -58,6 +58,25 @@ interface AppContextType {
   placeOrder: (addressId?: string) => Promise<Order>;
   verifyPayment: (reference: string) => Promise<Order & { gatewayStatus: string }>;
 
+  // chat (customer support - polling based)
+  chatMessages: ChatMessage[];
+  chatConversationId: string | null;
+  chatUnreadCount: number;
+  chatQueue: ChatConversationSummary[];
+  chatMine: ChatConversationSummary[];
+  fetchChat: (markRead?: boolean) => Promise<void>;
+  fetchChatThread: (conversationId: string) => Promise<void>;
+  fetchChatQueue: () => Promise<void>;
+  sendChatMessage: (body: string) => Promise<void>;
+  sendStaffReply: (conversationId: string, body: string) => Promise<void>;
+
+  // reviews - fetched on demand per subject, not held as global state
+  fetchReviews: (subjectType: ReviewSubjectType, subjectId?: string) => Promise<{ average: number; count: number; reviews: Review[] }>;
+  addReview: (data: { subjectType: ReviewSubjectType; subjectId?: string; rating: number; comment: string }) => Promise<Review>;
+  deleteReview: (id: string) => Promise<void>;
+  allReviews: Review[];
+  fetchAllReviews: () => Promise<void>;
+
   // admin/staff only
   staff: Staff[];
   uploadImage: (file: File, folder: UploadFolder) => Promise<string>;
@@ -102,6 +121,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
 
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatConversationId, setChatConversationId] = useState<string | null>(null);
+  const [chatUnreadCount, setChatUnreadCount] = useState(0);
+  const [chatQueue, setChatQueue] = useState<ChatConversationSummary[]>([]);
+  const [chatMine, setChatMine] = useState<ChatConversationSummary[]>([]);
+  const [allReviews, setAllReviews] = useState<Review[]>([]);
+
   const fetchProducts = () => ApiRequest({ url: `${baseUrl}/product` }).then((data: Product[]) => setProducts(data));
   const fetchCollections = () => ApiRequest({ url: `${baseUrl}/collection` }).then((data: Collection[]) => setCollections(data));
   const fetchArticles = () => ApiRequest({ url: `${baseUrl}/article` }).then((data: Article[]) => setArticles(data));
@@ -121,13 +147,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .finally(() => setCatalogReady(true));
   }, []);
 
-  // Restores the session from the auth cookie on load.
+  // Restores the session from the stored bearer token on load.
   useEffect(() => {
     ApiRequest({ url: `${baseUrl}/ping` })
       .then((data: { user?: User }) => {
         if (data.user) setUser(data.user);
       })
-      .catch(console.error)
+      .catch(err => {
+        console.error(err);
+        // Token was rejected (expired/revoked/deactivated) - stop sending it.
+        clearToken();
+      })
       .finally(() => setAuthReady(true));
   }, []);
 
@@ -161,6 +191,68 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .catch(console.error);
   };
 
+  // Customer-shaped endpoint call: GET /chat (no id) returns the caller's own
+  // conversation for a customer, but {queue, mine} for staff/admin - only
+  // ever call this for customers (see fetchChatQueue for the staff shape).
+  const fetchChat = (markRead = true) => {
+    return ApiRequest({ url: `${baseUrl}/chat?markRead=${markRead ? '1' : '0'}` })
+      .then((data: { conversationId?: string; unreadCount?: number; messages?: ChatMessage[] }) => {
+        setChatConversationId(data.conversationId ?? null);
+        setChatUnreadCount(data.unreadCount ?? 0);
+        setChatMessages(data.messages ?? []);
+      })
+      .catch(console.error);
+  };
+
+  const fetchChatThread = (conversationId: string) => {
+    return ApiRequest({ url: `${baseUrl}/chat/${conversationId}` })
+      .then((data: { conversationId: string; messages: ChatMessage[] }) => {
+        setChatConversationId(data.conversationId);
+        setChatMessages(data.messages);
+      })
+      .catch(console.error);
+  };
+
+  const fetchChatQueue = () => {
+    return ApiRequest({ url: `${baseUrl}/chat` })
+      .then((data: { queue: ChatConversationSummary[]; mine: ChatConversationSummary[] }) => {
+        setChatQueue(data.queue);
+        setChatMine(data.mine);
+      })
+      .catch(console.error);
+  };
+
+  const sendChatMessage = async (body: string) => {
+    await ApiRequest({ url: `${baseUrl}/chat`, method: 'POST', body: { body } });
+    await fetchChat(true);
+  };
+
+  const sendStaffReply = async (conversationId: string, body: string) => {
+    await ApiRequest({ url: `${baseUrl}/chat`, method: 'POST', body: { conversationId, body } });
+    await Promise.all([fetchChatThread(conversationId), fetchChatQueue()]);
+  };
+
+  const fetchReviews = (subjectType: ReviewSubjectType, subjectId?: string) => {
+    const path = subjectType === 'site' ? 'site' : `${subjectType}/${subjectId}`;
+    return ApiRequest({ url: `${baseUrl}/review/${path}` }) as Promise<{
+      average: number; count: number; reviews: Review[];
+    }>;
+  };
+
+  const addReview = async (data: { subjectType: ReviewSubjectType; subjectId?: string; rating: number; comment: string }) => {
+    return (await ApiRequest({ url: `${baseUrl}/review`, method: 'POST', body: data })) as Review;
+  };
+
+  const deleteReview = async (id: string) => {
+    await ApiRequest({ url: `${baseUrl}/review/${id}`, method: 'DELETE' });
+  };
+
+  const fetchAllReviews = () => {
+    return ApiRequest({ url: `${baseUrl}/review/all` })
+      .then((data: Review[]) => setAllReviews(data))
+      .catch(console.error);
+  };
+
   // Cart/orders/addresses/wishlist are per-account, so (re)load them whenever
   // the session changes. Wishlist stays as-is (local) for guests instead of
   // clearing, so browsing before logging in isn't lost.
@@ -170,12 +262,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
       fetchOrders();
       fetchAddresses();
       fetchWishlist();
-      if (user.role === 'admin') fetchStaff();
+      if (user.role === 'admin' || user.role === 'staff') {
+        fetchChatQueue();
+        fetchAllReviews();
+        if (user.role === 'admin') fetchStaff();
+      } else {
+        fetchChat(false); // badge-only; the chat panel marks read once actually opened
+      }
     } else {
       setCartItems([]);
       setOrders([]);
       setAddresses([]);
       setStaff([]);
+      setChatMessages([]);
+      setChatConversationId(null);
+      setChatUnreadCount(0);
+      setChatQueue([]);
+      setChatMine([]);
+      setAllReviews([]);
     }
   }, [user]);
 
@@ -185,6 +289,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       method: 'POST',
       body: { email, password },
     });
+    setToken(data.token);
     setUser(data.user as User);
   };
 
@@ -194,11 +299,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       method: 'POST',
       body: { name, email, password },
     });
+    setToken(data.token);
     setUser(data.user as User);
   };
 
   const logout = async () => {
-    await ApiRequest({ url: `${baseUrl}/auth`, method: 'DELETE' });
+    try {
+      await ApiRequest({ url: `${baseUrl}/auth`, method: 'DELETE' });
+    } finally {
+      clearToken();
+    }
     setUser(null);
   };
 
@@ -453,6 +563,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         orders,
         placeOrder,
         verifyPayment,
+        chatMessages,
+        chatConversationId,
+        chatUnreadCount,
+        chatQueue,
+        chatMine,
+        fetchChat,
+        fetchChatThread,
+        fetchChatQueue,
+        sendChatMessage,
+        sendStaffReply,
+        fetchReviews,
+        addReview,
+        deleteReview,
+        allReviews,
+        fetchAllReviews,
         staff,
         uploadImage,
         addProductAdmin,

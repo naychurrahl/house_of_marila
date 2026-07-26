@@ -8,6 +8,8 @@ import { JournalTab } from '@/app/components/admin/JournalTab';
 import { LocationsTab } from '@/app/components/admin/LocationsTab';
 import { InfoTab } from '@/app/components/admin/InfoTab';
 import { UsersTab } from '@/app/components/admin/UsersTab';
+import { ChatTab } from '@/app/components/admin/ChatTab';
+import { ReviewsTab } from '@/app/components/admin/ReviewsTab';
 
 const orderStatuses: Order['status'][] = ['processing', 'shipped', 'delivered'];
 
@@ -98,6 +100,8 @@ const tabs = [
   { key: 'collections', label: 'Collections' },
   { key: 'journal', label: 'Journal' },
   { key: 'orders', label: 'Orders' },
+  { key: 'chat', label: 'Chat' },
+  { key: 'reviews', label: 'Reviews' },
   { key: 'locations', label: 'Locations' },
   { key: 'users', label: 'Users' },
   { key: 'info', label: 'Info' },
@@ -141,6 +145,8 @@ export function AdminPage() {
         {tab === 'collections' && <CollectionsTab />}
         {tab === 'journal' && <JournalTab />}
         {tab === 'orders' && <OrdersTab />}
+        {tab === 'chat' && <ChatTab />}
+        {tab === 'reviews' && <ReviewsTab />}
         {tab === 'locations' && <LocationsTab />}
         {tab === 'users' && user.role === 'admin' && <UsersTab />}
         {tab === 'info' && user.role === 'admin' && <InfoTab />}

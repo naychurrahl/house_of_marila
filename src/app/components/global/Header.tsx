@@ -13,7 +13,7 @@ export function Header({ onSearchClick, onCartClick, onMenuClick }: HeaderProps)
 
   return (
     <header className="fixed top-0 left-0 right-0 bg-white border-b border-black z-40">
-      <div className="flex items-center justify-between px-4 h-14">
+      <div className="flex items-center justify-between px-4 h-14 max-w-[1440px] mx-auto">
         <button
           onClick={onMenuClick}
           className="p-2 -ml-2"

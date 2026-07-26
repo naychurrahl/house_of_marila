@@ -8,7 +8,7 @@ export function JournalPage() {
 
   return (
     <div className="pt-14 min-h-screen">
-      <div className="py-12 px-4">
+      <div className="py-12 px-4 max-w-[1440px] mx-auto">
         <h1 className="text-4xl mb-3 tracking-tight">Journal</h1>
         <p className="text-neutral-600 mb-12">
           Stories, interviews, and insights from the studio
@@ -22,7 +22,7 @@ export function JournalPage() {
         )}
 
         {/* Other Articles */}
-        <div className="grid grid-cols-1 gap-12">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
           {otherArticles.map(article => (
             <ArticleCard key={article.id} article={article} />
           ))}

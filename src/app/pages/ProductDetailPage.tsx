@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router';
 import { useApp } from '@/app/context/AppContext';
 import { Heart, Check } from 'lucide-react';
 import { ProductGrid } from '@/app/components/products/ProductGrid';
+import { ReviewsSection } from '@/app/components/reviews/ReviewsSection';
 
 export function ProductDetailPage() {
   const { id } = useParams();
@@ -67,6 +68,7 @@ export function ProductDetailPage() {
 
   return (
     <div className="pt-14 min-h-screen">
+      <div className="max-w-2xl mx-auto">
       {/* Product Gallery */}
       <div className="relative">
         <div className="aspect-[3/4] bg-neutral-100">
@@ -197,13 +199,18 @@ export function ProductDetailPage() {
         )}
       </div>
 
+      <ReviewsSection subjectType="product" subjectId={product.id} />
+      </div>
+
       {/* Related Products */}
       {relatedProducts.length > 0 && (
         <section className="py-12 bg-neutral-50">
-          <div className="px-4 mb-6">
-            <h2 className="text-2xl tracking-tight">You May Also Like</h2>
+          <div className="max-w-[1440px] mx-auto">
+            <div className="px-4 mb-6">
+              <h2 className="text-2xl tracking-tight">You May Also Like</h2>
+            </div>
+            <ProductGrid products={relatedProducts} />
           </div>
-          <ProductGrid products={relatedProducts} />
         </section>
       )}
     </div>
