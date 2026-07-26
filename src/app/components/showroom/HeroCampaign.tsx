@@ -9,7 +9,7 @@ interface HeroCampaignProps {
 
 export function HeroCampaign({ title, subtitle, image, link }: HeroCampaignProps) {
   return (
-    <Link to={link} className="block relative h-[70vh] overflow-hidden">
+    <Link to={link} className="block relative h-[70vh] overflow-hidden max-w-[1440px] mx-auto">
       <div className="absolute inset-0 bg-neutral-900">
         <img
           src={image}

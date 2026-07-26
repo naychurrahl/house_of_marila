@@ -13,6 +13,7 @@ import { CheckoutPage } from '@/app/pages/CheckoutPage';
 import { OrderConfirmationPage } from '@/app/pages/OrderConfirmationPage';
 import { ContactPage } from '@/app/pages/ContactPage';
 import { StoreLocatorPage } from '@/app/pages/StoreLocatorPage';
+import { AdminPage } from '@/app/pages/AdminPage';
 
 export const router = createBrowserRouter([
   {
@@ -32,6 +33,7 @@ export const router = createBrowserRouter([
       { path: 'order-confirmation/:id', Component: OrderConfirmationPage },
       { path: 'contact', Component: ContactPage },
       { path: 'stores', Component: StoreLocatorPage },
+      { path: 'admin', Component: AdminPage },
     ],
   },
 ]);

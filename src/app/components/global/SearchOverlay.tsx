@@ -1,7 +1,7 @@
 import { X, Search } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useState } from 'react';
-import { products } from '@/app/data/mockData';
+import { useApp } from '@/app/context/AppContext';
 import { Link } from 'react-router';
 
 interface SearchOverlayProps {
@@ -10,6 +10,7 @@ interface SearchOverlayProps {
 }
 
 export function SearchOverlay({ isOpen, onClose }: SearchOverlayProps) {
+  const { products } = useApp();
   const [query, setQuery] = useState('');
 
   const results = query.length > 0

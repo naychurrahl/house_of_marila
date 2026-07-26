@@ -1,12 +1,18 @@
 import { useParams, Link } from 'react-router';
-import { collections, products } from '@/app/data/mockData';
+import { useApp } from '@/app/context/AppContext';
 import { ProductGrid } from '@/app/components/products/ProductGrid';
+import { ReviewsSection } from '@/app/components/reviews/ReviewsSection';
 import { useState } from 'react';
 
 export function CollectionDetailPage() {
   const { id } = useParams();
+  const { collections, products, catalogReady } = useApp();
   const collection = collections.find(c => c.id === id);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+
+  if (!catalogReady) {
+    return <div className="pt-14 min-h-screen" />;
+  }
 
   if (!collection) {
     return (
@@ -26,7 +32,7 @@ export function CollectionDetailPage() {
   return (
     <div className="pt-14 min-h-screen">
       {/* Lookbook Gallery */}
-      <div className="relative h-[80vh] bg-black">
+      <div className="relative h-[80vh] bg-black max-w-[1440px] mx-auto">
         <img
           src={collection.images[currentImageIndex]}
           alt={collection.name}
@@ -60,11 +66,15 @@ export function CollectionDetailPage() {
 
       {/* Products */}
       <section className="py-12 bg-neutral-50">
-        <div className="px-4 mb-8">
-          <h2 className="text-2xl tracking-tight">Shop The Collection</h2>
+        <div className="max-w-[1440px] mx-auto">
+          <div className="px-4 mb-8">
+            <h2 className="text-2xl tracking-tight">Shop The Collection</h2>
+          </div>
+          <ProductGrid products={collectionProducts} />
         </div>
-        <ProductGrid products={collectionProducts} />
       </section>
+
+      <ReviewsSection subjectType="collection" subjectId={collection.id} />
     </div>
   );
 }

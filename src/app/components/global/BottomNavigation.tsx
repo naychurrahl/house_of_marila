@@ -14,7 +14,7 @@ export function BottomNavigation() {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-black z-40">
-      <div className="flex items-center justify-around h-16">
+      <div className="flex items-center justify-around h-16 max-w-[1440px] mx-auto">
         {links.map(({ to, icon: Icon, label }) => {
           const isActive = location.pathname === to;
           return (

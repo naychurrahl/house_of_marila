@@ -45,8 +45,13 @@ export interface CartItem {
 
 export interface Order {
   id: string;
+  userId: string;
   date: string;
   status: 'processing' | 'shipped' | 'delivered';
+  paymentStatus: 'pending' | 'success' | 'failed';
+  subtotal: number;
+  shipping: number;
+  tax: number;
   total: number;
   items: CartItem[];
 }
@@ -69,4 +74,61 @@ export interface Location {
   city: string;
   hours: string;
   phone: string;
+}
+
+export interface User {
+  id: string;
+  name: string | null;
+  email: string;
+  role: 'guest' | 'customer' | 'staff' | 'admin';
+}
+
+export interface SiteSettings {
+  name: string;
+  tagline: string | null;
+  logo: string | null;
+  instagram: string | null;
+  twitter: string | null;
+  pinterest: string | null;
+}
+
+export interface Staff {
+  id: string;
+  name: string | null;
+  email: string;
+  role: 'admin' | 'staff';
+  active: 'active' | 'inactive';
+}
+
+export interface ChatMessage {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  senderRole: 'customer' | 'staff' | 'admin';
+  body: string;
+  createdAt: string;
+}
+
+export interface ChatConversationSummary {
+  id: string;
+  userId: string;
+  userName: string | null;
+  userEmail: string;
+  claimedBy: string | null;
+  lastMessage: string | null;
+  lastMessageAt: string | null;
+  unreadCount: number;
+}
+
+export type ReviewSubjectType = 'product' | 'collection' | 'site';
+
+export interface Review {
+  id: string;
+  userId: string;
+  userName: string | null;
+  subjectType: ReviewSubjectType;
+  subjectId: string;
+  rating: number;
+  comment: string;
+  createdAt: string;
 }

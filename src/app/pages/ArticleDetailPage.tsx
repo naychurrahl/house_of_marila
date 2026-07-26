@@ -1,9 +1,14 @@
 import { useParams, Link } from 'react-router';
-import { articles } from '@/app/data/mockData';
+import { useApp } from '@/app/context/AppContext';
 
 export function ArticleDetailPage() {
   const { id } = useParams();
+  const { articles, catalogReady } = useApp();
   const article = articles.find(a => a.id === id);
+
+  if (!catalogReady) {
+    return <div className="pt-14 min-h-screen" />;
+  }
 
   if (!article) {
     return (

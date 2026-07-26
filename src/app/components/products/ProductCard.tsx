@@ -1,14 +1,14 @@
 import { Link } from 'react-router';
 import { Heart } from 'lucide-react';
 import { Product } from '@/app/data/types';
-import { useCart } from '@/app/context/CartContext';
+import { useApp } from '@/app/context/AppContext';
 
 interface ProductCardProps {
   product: Product;
 }
 
 export function ProductCard({ product }: ProductCardProps) {
-  const { wishlist, toggleWishlist } = useCart();
+  const { wishlist, toggleWishlist } = useApp();
   const isWishlisted = wishlist.includes(product.id);
 
   return (

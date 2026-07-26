@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { products } from '@/app/data/mockData';
+import { useApp } from '@/app/context/AppContext';
 import { ProductGrid } from '@/app/components/products/ProductGrid';
 import { SlidersHorizontal } from 'lucide-react';
 
 export function ShopPage() {
+  const { products } = useApp();
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [sortBy, setSortBy] = useState<string>('newest');
 
@@ -22,7 +23,7 @@ export function ShopPage() {
 
   return (
     <div className="pt-14 min-h-screen">
-      <div className="py-8 px-4">
+      <div className="py-8 px-4 max-w-[1440px] mx-auto">
         <h1 className="text-4xl mb-8 tracking-tight">Shop</h1>
 
         {/* Filters */}
