@@ -134,9 +134,9 @@ export function LocationsTab() {
       <div className="space-y-4">
         {locations.map(location => (
           <div key={location.id} className="border border-neutral-200 p-6">
-            <div className="flex items-start justify-between mb-2">
-              <h3 className="text-sm">{location.name}</h3>
-              <div className="flex gap-3">
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <h3 className="text-sm min-w-0 truncate">{location.name}</h3>
+              <div className="flex gap-3 flex-shrink-0">
                 <button onClick={() => setEditing(location)} className="text-xs underline hover:text-black">
                   Edit
                 </button>

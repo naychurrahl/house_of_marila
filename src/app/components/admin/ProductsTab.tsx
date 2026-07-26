@@ -118,7 +118,7 @@ function ProductFormPanel({ product, onDone }: { product: Product | null; onDone
     <form onSubmit={handleSubmit} className="border border-neutral-200 p-6 mb-8 space-y-6 max-w-2xl">
       <h3 className="text-lg tracking-tight">{product ? 'Edit Product' : 'New Product'}</h3>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm mb-2">Name</label>
           <input
@@ -141,7 +141,7 @@ function ProductFormPanel({ product, onDone }: { product: Product | null; onDone
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm mb-2">Category</label>
           <select

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '@/app/context/AppContext';
 import { ChatConversationSummary } from '@/app/data/types';
+import { ChevronLeft } from 'lucide-react';
 
 function ConversationRow({
   conversation,
@@ -34,6 +35,7 @@ export function ChatTab() {
   } = useApp();
 
   const [activeId, setActiveId] = useState<string | null>(null);
+  const activeConversation = [...chatQueue, ...chatMine].find(c => c.id === activeId) ?? null;
   const [text, setText] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState('');
@@ -74,8 +76,10 @@ export function ChatTab() {
   };
 
   return (
-    <div className="flex border border-neutral-200 h-[70vh]">
-      <div className="w-72 border-r border-neutral-200 overflow-y-auto flex-shrink-0">
+    <div className="flex flex-col md:flex-row border border-neutral-200 h-[70vh]">
+      <div
+        className={`${activeId ? 'hidden md:block' : 'block'} w-full md:w-72 border-r border-neutral-200 overflow-y-auto flex-shrink-0`}
+      >
         <div className="px-4 py-2 text-xs tracking-wide uppercase text-neutral-500 bg-neutral-50">
           Queue ({chatQueue.length})
         </div>
@@ -105,13 +109,21 @@ export function ChatTab() {
         )}
       </div>
 
-      <div className="flex-1 flex flex-col">
+      <div className={`${activeId ? 'flex' : 'hidden md:flex'} flex-1 flex-col min-w-0`}>
         {!activeId ? (
           <div className="flex-1 flex items-center justify-center text-neutral-500 text-sm">
             Select a conversation
           </div>
         ) : (
           <>
+            <button
+              onClick={() => setActiveId(null)}
+              className="md:hidden flex items-center gap-1 px-4 py-3 border-b border-neutral-200 text-sm text-neutral-600"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              {activeConversation?.userName || activeConversation?.userEmail || 'Back to conversations'}
+            </button>
+
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-4">
               {chatMessages.map(message => {
                 const isMine = message.senderRole !== 'customer';

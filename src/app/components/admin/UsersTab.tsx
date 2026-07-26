@@ -109,38 +109,40 @@ export function UsersTab() {
         <Plus className="w-4 h-4" /> NEW STAFF ACCOUNT
       </button>
 
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-neutral-500 border-b border-neutral-200">
-            <th className="pb-2 pr-4 font-normal">Name</th>
-            <th className="pb-2 pr-4 font-normal">Email</th>
-            <th className="pb-2 pr-4 font-normal">Role</th>
-            <th className="pb-2 pr-4 font-normal">Status</th>
-            <th className="pb-2 font-normal"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {staff.map(member => (
-            <tr key={member.id} className="border-b border-neutral-200">
-              <td className="py-3 pr-4">{member.name ?? '—'}</td>
-              <td className="py-3 pr-4">{member.email}</td>
-              <td className="py-3 pr-4 uppercase text-xs">{member.role}</td>
-              <td className="py-3 pr-4">
-                <span className={`text-xs px-2 py-1 ${member.active === 'active' ? 'bg-green-100 text-green-800' : 'bg-neutral-100'}`}>
-                  {member.active.toUpperCase()}
-                </span>
-              </td>
-              <td className="py-3">
-                {member.active === 'active' && (
-                  <button onClick={() => handleDeactivate(member.id)} className="text-xs underline text-red-700">
-                    Deactivate
-                  </button>
-                )}
-              </td>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-neutral-500 border-b border-neutral-200">
+              <th className="pb-2 pr-4 font-normal">Name</th>
+              <th className="pb-2 pr-4 font-normal">Email</th>
+              <th className="pb-2 pr-4 font-normal">Role</th>
+              <th className="pb-2 pr-4 font-normal">Status</th>
+              <th className="pb-2 font-normal"></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {staff.map(member => (
+              <tr key={member.id} className="border-b border-neutral-200">
+                <td className="py-3 pr-4">{member.name ?? '—'}</td>
+                <td className="py-3 pr-4">{member.email}</td>
+                <td className="py-3 pr-4 uppercase text-xs">{member.role}</td>
+                <td className="py-3 pr-4">
+                  <span className={`text-xs px-2 py-1 ${member.active === 'active' ? 'bg-green-100 text-green-800' : 'bg-neutral-100'}`}>
+                    {member.active.toUpperCase()}
+                  </span>
+                </td>
+                <td className="py-3">
+                  {member.active === 'active' && (
+                    <button onClick={() => handleDeactivate(member.id)} className="text-xs underline text-red-700">
+                      Deactivate
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
