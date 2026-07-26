@@ -89,7 +89,7 @@ function ArticleFormPanel({ article, onDone }: { article: Article | null; onDone
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div>
           <label className="block text-sm mb-2">Author</label>
           <input
@@ -190,11 +190,11 @@ export function JournalTab() {
         {articles.map(article => (
           <div key={article.id} className="border border-neutral-200 p-6 flex items-center gap-4">
             <img src={article.coverImage} alt="" className="w-16 h-20 object-cover flex-shrink-0" />
-            <div className="flex-1">
-              <h3 className="text-sm mb-1">{article.title}</h3>
-              <p className="text-xs text-neutral-500">{article.category} &middot; {article.date} &middot; {article.author}</p>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-sm mb-1 truncate">{article.title}</h3>
+              <p className="text-xs text-neutral-500 truncate">{article.category} &middot; {article.date} &middot; {article.author}</p>
             </div>
-            <div className="flex gap-3">
+            <div className="flex gap-3 flex-shrink-0">
               <button onClick={() => setEditing(article)} className="text-xs underline hover:text-black">
                 Edit
               </button>
