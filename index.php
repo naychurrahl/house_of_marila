@@ -1,11 +1,13 @@
 <?php
 
-$allowedOrigins = include __DIR__ . '/../config/cors.php';
+$allowedOrigins = include dirname(__DIR__) . '/config/cors.php';
 
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 
-if (in_array($origin, $allowedOrigins, true)) {
-    header("Access-Control-Allow-Origin: $origin");
+$isLocalDev = (bool) preg_match('#^https?://(localhost|127\.0\.0\.1)(:\d+)?$#', $origin);
+
+if ($isLocalDev || in_array($origin, $allowedOrigins, true)) {
+  header("Access-Control-Allow-Origin: $origin");
 }
 
 header("Access-Control-Allow-Credentials: true");

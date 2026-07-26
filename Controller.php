@@ -504,6 +504,55 @@ class Controller
                 }
                 break;
 
+            case 'chat':
+                switch ($this->method) {
+                    case 'GET':
+                        $this->functions->consoleLog(
+                            $this->functions->fetchConversation(
+                                $this->action ?? null,
+                                ($this->requestBody['markRead'] ?? '1') !== '0'
+                            )
+                        );
+                        break;
+
+                    case 'POST':
+                        $this->functions->consoleLog(
+                            $this->functions->postMessage($this->requestBody)
+                        );
+                        break;
+
+                    default:
+                        $this->methodNotAllowed(['GET', 'POST']);
+                        break;
+                }
+                break;
+
+            case 'review':
+                switch ($this->method) {
+                    case 'GET':
+                        $this->functions->consoleLog(
+                            $this->functions->fetchReviews($this->action ?? '', $this->param ?? null)
+                        );
+                        break;
+
+                    case 'POST':
+                        $this->functions->consoleLog(
+                            $this->functions->addReview($this->requestBody)
+                        );
+                        break;
+
+                    case 'DELETE':
+                        $this->functions->consoleLog(
+                            $this->functions->deleteReview($this->action ?? '')
+                        );
+                        break;
+
+                    default:
+                        $this->methodNotAllowed(['GET', 'POST', 'DELETE']);
+                        break;
+                }
+                break;
+
             default:
                 $this->endpointNotFound();
         }

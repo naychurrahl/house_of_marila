@@ -135,13 +135,14 @@ CREATE TABLE site_settings (
 
 -- Users / auth
 CREATE TABLE users (
-  id         VARCHAR(100)  NOT NULL PRIMARY KEY,
-  email      VARCHAR(100)  NOT NULL UNIQUE,
-  name       VARCHAR(100)  NULL,
-  role       ENUM('guest', 'customer', 'staff', 'admin') NOT NULL DEFAULT 'customer',
-  active     ENUM('active', 'inactive') NOT NULL DEFAULT 'inactive',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  id            VARCHAR(100)  NOT NULL PRIMARY KEY,
+  email         VARCHAR(100)  NOT NULL UNIQUE,
+  name          VARCHAR(100)  NULL,
+  role          ENUM('guest', 'customer', 'staff', 'admin') NOT NULL DEFAULT 'customer',
+  active        ENUM('active', 'inactive') NOT NULL DEFAULT 'inactive',
+  token_version INT           NOT NULL DEFAULT 0,
+  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
 CREATE TABLE hashes (
@@ -232,6 +233,55 @@ CREATE TABLE wishlist_items (
   PRIMARY KEY (user_id, product_id),
   FOREIGN KEY (user_id)    REFERENCES users(id)    ON DELETE CASCADE,
   FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+);
+
+-- Customer support chat (one conversation per customer; any staff/admin may
+-- claim it by replying - see Functions.php's lazy staleness sweep for how
+-- claimed_by gets released back to the queue). Timestamps use microsecond
+-- precision (6) because unread/claim logic compares them against message
+-- created_at values that can land in the same whole second (e.g. a customer
+-- message immediately followed by a reply) - whole-second TIMESTAMPs would
+-- make same-second events compare as equal instead of ordered.
+CREATE TABLE conversations (
+  id                     VARCHAR(100)  NOT NULL PRIMARY KEY,
+  user_id                VARCHAR(100)  NOT NULL,
+  claimed_by             VARCHAR(100)  NULL,
+  claimed_at             TIMESTAMP(6) NULL DEFAULT NULL,
+  customer_last_read_at  TIMESTAMP(6) NULL DEFAULT NULL,
+  staff_last_read_at     TIMESTAMP(6) NULL DEFAULT NULL,
+  created_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (claimed_by) REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE KEY uniq_conversation_user (user_id)
+);
+
+CREATE TABLE messages (
+  id              VARCHAR(100)  NOT NULL PRIMARY KEY,
+  conversation_id VARCHAR(100)  NOT NULL,
+  sender_id       VARCHAR(100)  NOT NULL,
+  sender_role     ENUM('customer', 'staff', 'admin') NOT NULL,
+  body            TEXT          NOT NULL,
+  created_at      TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP(6),
+  FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+  FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_messages_conversation (conversation_id, created_at)
+);
+
+-- Reviews (products, collections, and the site itself - subject_id is the
+-- literal string 'site' for site-wide reviews, mirroring site_settings'
+-- single-row convention since "the site" has no natural foreign key)
+CREATE TABLE reviews (
+  id           VARCHAR(100)  NOT NULL PRIMARY KEY,
+  user_id      VARCHAR(100)  NOT NULL,
+  subject_type ENUM('product', 'collection', 'site') NOT NULL,
+  subject_id   VARCHAR(100)  NOT NULL,
+  rating       TINYINT       NOT NULL,
+  comment      TEXT          NOT NULL,
+  created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY uniq_review_per_subject (user_id, subject_type, subject_id),
+  CHECK (rating BETWEEN 1 AND 5),
+  INDEX idx_reviews_subject (subject_type, subject_id)
 );
 
 

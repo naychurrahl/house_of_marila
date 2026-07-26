@@ -26,6 +26,8 @@ define('PAYSTACK_PUBLIC_KEY', include_once _DIR_(1) . '/config/paystack_public.p
 
 class Functions
 {
+    private const TOKEN_TTL_SECONDS = 60 * 60 * 24; // 24h - hard cutoff, no refresh flow
+
     private array $userLoad = [];
     private bool $auth = False;
 
@@ -128,6 +130,7 @@ class Functions
         $header = json_encode(['typ' => 'JWT', 'alg' => 'HS256']);
 
         $payload['iat'] = time();
+        $payload['exp'] = time() + self::TOKEN_TTL_SECONDS;
 
         $base64UrlHeader = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($header));
         $base64UrlPayload = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode(json_encode($payload)));
@@ -178,7 +181,10 @@ class Functions
             if (!$token) {
                 $headers = getallheaders();
                 $authHeader = $headers['Authorization'] ?? '';
-                $token = str_replace('Bearer ', '', $authHeader);
+                // Case-insensitive scheme match ("Bearer"/"bearer"/"BEARER") -
+                // the HTTP spec treats auth schemes as case-insensitive, and
+                // not every client capitalizes it the same way.
+                $token = trim(preg_replace('/^bearer\s+/i', '', trim($authHeader)));
             }
 
             if (!$token) throw new ExpiredException('No token provided', 401);
@@ -202,6 +208,10 @@ class Functions
 
             if (!$payload) throw new ExpiredException('Authorization failed', 401);
 
+            if (($payload['exp'] ?? 0) < time()) {
+                throw new ExpiredException('Token expired', 401);
+            }
+
             // The signature only proves the token wasn't tampered with, not
             // that the account it names still exists - a deleted/deactivated
             // user's old cookie would otherwise keep passing auth and crash
@@ -209,15 +219,35 @@ class Functions
             $db = Database::getInstance();
             $con = $db->connect();
 
-            $stmt = $con->prepare("SELECT active FROM users WHERE id = ?");
+            $stmt = $con->prepare("SELECT id, name, email, role, active, token_version FROM users WHERE id = ?");
             $stmt->execute([$payload['id'] ?? '']);
-            $user = $stmt->fetch();
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$user || $user['active'] !== 'active') {
                 throw new ExpiredException('Session no longer valid, please log in again', 401);
             }
 
-            $this->userLoad = $payload;
+            // Revocation: logout/password-change bump this counter, which
+            // instantly invalidates every token minted before the bump for
+            // this account - including copies the legitimate user no longer
+            // has (e.g. a token lifted from a compromised device).
+            if ((int) $user['token_version'] !== (int) ($payload['tokenVersion'] ?? -1)) {
+                throw new ExpiredException('Session revoked, please log in again', 401);
+            }
+
+            // Re-derive from the DB every request rather than trusting the
+            // token's baked-in snapshot, so a name/role change (or the
+            // rolling cookie refresh in consoleLog()) carries current data
+            // forward instead of perpetuating whatever was true at login -
+            // a demoted staff member's very next request reflects it, not
+            // just their next login.
+            $this->userLoad = [
+                'id' => $user['id'],
+                'name' => $user['name'],
+                'email' => $user['email'],
+                'role' => $user['role'],
+                'tokenVersion' => (int) $user['token_version'],
+            ];
             $this->auth = True;
         } catch (ExpiredException $th) {
             throw new ExpiredException($th->getMessage(), $th->getCode());
@@ -267,7 +297,7 @@ class Functions
             $con = $db->connect();
 
             $stmt = $con->prepare("
-                SELECT u.id, u.name, u.email, u.role, h.ash AS hash
+                SELECT u.id, u.name, u.email, u.role, u.token_version, h.ash AS hash
                 FROM users u
                 JOIN hashes h ON h.id = u.id
                 WHERE u.email = ?
@@ -281,6 +311,8 @@ class Functions
             }
 
             unset($user['hash']);
+            $user['tokenVersion'] = (int) $user['token_version'];
+            unset($user['token_version']);
 
             $token = $this->manageCookies($user);
             $this->userLoad = $user;
@@ -295,6 +327,17 @@ class Functions
 
     public function logOut(): void
     {
+        if ($this->auth && isset($this->userLoad['id'])) {
+            $db = Database::getInstance();
+            $con = $db->connect();
+
+            // Actual revocation, not just "stop sending the cookie" - bumping
+            // this counter invalidates every token issued before it for this
+            // account, including any other copies elsewhere.
+            $con->prepare("UPDATE users SET token_version = token_version + 1 WHERE id = ?")
+                ->execute([$this->userLoad['id']]);
+        }
+
         $this->userLoad = [];
         $this->auth = false;
         $this->manageCookies();
@@ -476,7 +519,7 @@ class Functions
 
             $con->commit();
 
-            $user = ['id' => $id, 'name' => $name, 'email' => $email, 'role' => 'customer'];
+            $user = ['id' => $id, 'name' => $name, 'email' => $email, 'role' => 'customer', 'tokenVersion' => 0]; // fresh row, column default
             $token = $this->manageCookies($user);
             $this->userLoad = $user;
 
@@ -546,6 +589,10 @@ class Functions
             INSERT INTO hashes (id, ash) VALUES (?, ?)
             ON DUPLICATE KEY UPDATE ash = VALUES(ash)
         ")->execute([$id, password_hash($newPassword, PASSWORD_DEFAULT)]);
+
+        // A leaked-but-not-yet-used token shouldn't survive a password change.
+        $con->prepare("UPDATE users SET token_version = token_version + 1 WHERE id = ?")
+            ->execute([$id]);
 
         $this->consoleLog(['id' => $id, 'updated' => true]);
     }
@@ -1793,4 +1840,383 @@ class Functions
         $this->consoleLog(['id' => $id, 'updated' => $updated]);
     }
     // == ORDERS ==
+
+    // == CHAT ==
+    private const CHAT_CLAIM_STALE_MINUTES = 15;
+
+    private function mapMessageRow(array $row): array
+    {
+        return [
+            'id' => $row['id'],
+            'conversationId' => $row['conversation_id'],
+            'senderId' => $row['sender_id'],
+            'senderRole' => $row['sender_role'],
+            'body' => $row['body'],
+            'createdAt' => $row['created_at'],
+        ];
+    }
+
+    private function getOrCreateConversation(PDO $con, string $userId): array
+    {
+        $stmt = $con->prepare("SELECT * FROM conversations WHERE user_id = ?");
+        $stmt->execute([$userId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($row) return $row;
+
+        $id = $this->generateUniqueId($con, 'conv_', 'conversations');
+        $this->dbInsert($con, 'conversations', ['id' => $id, 'user_id' => $userId]);
+
+        $stmt = $con->prepare("SELECT * FROM conversations WHERE id = ?");
+        $stmt->execute([$id]);
+
+        return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    // No cron exists in this codebase, so a claimed-but-abandoned conversation
+    // (a customer message sitting unanswered past the stale window) is
+    // released back to the queue lazily, right before the staff list is read.
+    private function releaseStaleClaims(PDO $con): void
+    {
+        $minutes = self::CHAT_CLAIM_STALE_MINUTES;
+
+        $con->exec("
+            UPDATE conversations c
+            SET claimed_by = NULL, claimed_at = NULL
+            WHERE claimed_by IS NOT NULL
+            AND (SELECT MAX(created_at) FROM messages m WHERE m.conversation_id = c.id AND m.sender_role = 'customer')
+                > COALESCE(
+                    (SELECT MAX(created_at) FROM messages m WHERE m.conversation_id = c.id AND m.sender_role IN ('staff', 'admin')),
+                    c.claimed_at
+                  )
+            AND (SELECT MAX(created_at) FROM messages m WHERE m.conversation_id = c.id AND m.sender_role = 'customer')
+                < NOW() - INTERVAL $minutes MINUTE
+        ");
+    }
+
+    public function fetchConversation(?string $id = null, bool $markRead = true): void
+    {
+        $this->requireAuth();
+
+        $db = Database::getInstance();
+        $con = $db->connect();
+
+        $isStaff = in_array($this->userLoad['role'] ?? null, ['admin', 'staff'], true);
+
+        if ($id) {
+            $stmt = $con->prepare("SELECT * FROM conversations WHERE id = ?");
+            $stmt->execute([$id]);
+            $conversation = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$conversation) {
+                $this->consoleLog(['error' => 'Conversation not found'], 404);
+            }
+
+            if (!$isStaff && $conversation['user_id'] !== $this->userLoad['id']) {
+                $this->consoleLog(['error' => 'Forbidden'], 403);
+            }
+
+            $messages = $con->prepare("SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at");
+            $messages->execute([$id]);
+            $rows = $messages->fetchAll(PDO::FETCH_ASSOC);
+
+            if ($markRead) {
+                // NOW(6) (DB clock, microsecond precision) - not PHP's date():
+                // PHP and MySQL can run on different clocks/timezones, and this
+                // value is compared directly against messages.created_at
+                // (also DB-clock, same microsecond precision).
+                $readCol = $isStaff ? 'staff_last_read_at' : 'customer_last_read_at';
+                $con->prepare("UPDATE conversations SET `$readCol` = NOW(6) WHERE id = ?")->execute([$id]);
+            }
+
+            $this->consoleLog([
+                'conversationId' => $id,
+                'messages' => array_map([$this, 'mapMessageRow'], $rows),
+            ]);
+        }
+
+        if ($isStaff) {
+            $this->releaseStaleClaims($con);
+
+            $summarySql = "
+                SELECT c.id, c.user_id, u.name AS user_name, u.email AS user_email, c.claimed_by,
+                  (SELECT body FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message,
+                  (SELECT created_at FROM messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS last_message_at,
+                  (SELECT COUNT(*) FROM messages m WHERE m.conversation_id = c.id AND m.sender_role = 'customer'
+                     AND (c.staff_last_read_at IS NULL OR m.created_at > c.staff_last_read_at)) AS unread_count
+                FROM conversations c
+                JOIN users u ON u.id = c.user_id
+                WHERE c.claimed_by %s
+                ORDER BY last_message_at DESC
+            ";
+
+            $queueStmt = $con->query(sprintf($summarySql, 'IS NULL'));
+            $queue = $queueStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $mineStmt = $con->prepare(sprintf($summarySql, '= ?'));
+            $mineStmt->execute([$this->userLoad['id']]);
+            $mine = $mineStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $map = fn($row) => [
+                'id' => $row['id'],
+                'userId' => $row['user_id'],
+                'userName' => $row['user_name'],
+                'userEmail' => $row['user_email'],
+                'claimedBy' => $row['claimed_by'],
+                'lastMessage' => $row['last_message'],
+                'lastMessageAt' => $row['last_message_at'],
+                'unreadCount' => (int) $row['unread_count'],
+            ];
+
+            $this->consoleLog([
+                'queue' => array_map($map, $queue),
+                'mine' => array_map($map, $mine),
+            ]);
+        }
+
+        // Customer, no id: get-or-create their own conversation.
+        $conversation = $this->getOrCreateConversation($con, $this->userLoad['id']);
+
+        $unreadStmt = $con->prepare("
+            SELECT COUNT(*) FROM messages
+            WHERE conversation_id = ? AND sender_role IN ('staff', 'admin')
+            AND created_at > COALESCE(?, '1970-01-01')
+        ");
+        $unreadStmt->execute([$conversation['id'], $conversation['customer_last_read_at']]);
+        $unreadCount = (int) $unreadStmt->fetchColumn();
+
+        $messages = $con->prepare("SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at");
+        $messages->execute([$conversation['id']]);
+        $rows = $messages->fetchAll(PDO::FETCH_ASSOC);
+
+        if ($markRead) {
+            $con->prepare("UPDATE conversations SET customer_last_read_at = NOW(6) WHERE id = ?")
+                ->execute([$conversation['id']]);
+        }
+
+        $this->consoleLog([
+            'conversationId' => $conversation['id'],
+            'unreadCount' => $unreadCount,
+            'messages' => array_map([$this, 'mapMessageRow'], $rows),
+        ]);
+    }
+
+    public function postMessage(array $data): void
+    {
+        $this->requireAuth();
+
+        $body = trim($data['body'] ?? '');
+        if (!$this->check_required_fields(['body'], ['body' => $body])) return;
+
+        $db = Database::getInstance();
+        $con = $db->connect();
+
+        $isStaff = in_array($this->userLoad['role'] ?? null, ['admin', 'staff'], true);
+        $isAdmin = ($this->userLoad['role'] ?? null) === 'admin';
+
+        if ($isStaff) {
+            $conversationId = trim($data['conversationId'] ?? '');
+            if (!$this->check_required_fields(['conversationId'], ['conversationId' => $conversationId])) return;
+
+            $stmt = $con->prepare("SELECT * FROM conversations WHERE id = ?");
+            $stmt->execute([$conversationId]);
+            $conversation = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$conversation) {
+                $this->consoleLog(['error' => 'Conversation not found'], 404);
+            }
+
+            if ($conversation['claimed_by'] && $conversation['claimed_by'] !== $this->userLoad['id'] && !$isAdmin) {
+                $this->consoleLog(['error' => 'Conversation is claimed by another staff member'], 409);
+            }
+
+            if (!$conversation['claimed_by']) {
+                $con->prepare("UPDATE conversations SET claimed_by = ?, claimed_at = NOW(6) WHERE id = ?")
+                    ->execute([$this->userLoad['id'], $conversationId]);
+            }
+        } else {
+            $conversation = $this->getOrCreateConversation($con, $this->userLoad['id']);
+            $conversationId = $conversation['id'];
+        }
+
+        $id = $this->generateUniqueId($con, 'msg_', 'messages');
+
+        $this->dbInsert($con, 'messages', [
+            'id' => $id,
+            'conversation_id' => $conversationId,
+            'sender_id' => $this->userLoad['id'],
+            'sender_role' => $isStaff ? $this->userLoad['role'] : 'customer',
+            'body' => $body,
+        ]);
+
+        $readCol = $isStaff ? 'staff_last_read_at' : 'customer_last_read_at';
+        $con->prepare("UPDATE conversations SET `$readCol` = NOW(6) WHERE id = ?")->execute([$conversationId]);
+
+        $stmt = $con->prepare("SELECT * FROM messages WHERE id = ?");
+        $stmt->execute([$id]);
+
+        $this->consoleLog($this->mapMessageRow($stmt->fetch(PDO::FETCH_ASSOC)), 201);
+    }
+    // == CHAT ==
+
+    // == REVIEWS ==
+    private function mapReviewRow(array $row): array
+    {
+        return [
+            'id' => $row['id'],
+            'userId' => $row['user_id'],
+            'userName' => $row['user_name'] ?? null,
+            'subjectType' => $row['subject_type'],
+            'subjectId' => $row['subject_id'],
+            'rating' => (int) $row['rating'],
+            'comment' => $row['comment'],
+            'createdAt' => $row['created_at'],
+        ];
+    }
+
+    public function fetchReviews(string $subjectType, ?string $subjectId = null): void
+    {
+        $db = Database::getInstance();
+        $con = $db->connect();
+
+        if ($subjectType === 'all') {
+            $this->requireAuth(['admin', 'staff']);
+
+            $stmt = $con->query("
+                SELECT r.*, u.name AS user_name
+                FROM reviews r
+                JOIN users u ON u.id = r.user_id
+                ORDER BY r.created_at DESC
+            ");
+
+            $this->consoleLog(array_map([$this, 'mapReviewRow'], $stmt->fetchAll(PDO::FETCH_ASSOC)));
+        }
+
+        if (!in_array($subjectType, ['product', 'collection', 'site'], true)) {
+            $this->consoleLog(['error' => 'Invalid subject type'], 400);
+        }
+
+        $subjectId = $subjectType === 'site' ? 'site' : trim((string) $subjectId);
+        if (!$this->check_required_fields(['subjectId'], ['subjectId' => $subjectId])) return;
+
+        $stmt = $con->prepare("
+            SELECT r.*, u.name AS user_name
+            FROM reviews r
+            JOIN users u ON u.id = r.user_id
+            WHERE r.subject_type = ? AND r.subject_id = ?
+            ORDER BY r.created_at DESC
+        ");
+        $stmt->execute([$subjectType, $subjectId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $avgStmt = $con->prepare("
+            SELECT COALESCE(AVG(rating), 0) AS average, COUNT(*) AS count
+            FROM reviews WHERE subject_type = ? AND subject_id = ?
+        ");
+        $avgStmt->execute([$subjectType, $subjectId]);
+        $agg = $avgStmt->fetch(PDO::FETCH_ASSOC);
+
+        $this->consoleLog([
+            'average' => round((float) $agg['average'], 2),
+            'count' => (int) $agg['count'],
+            'reviews' => array_map([$this, 'mapReviewRow'], $rows),
+        ]);
+    }
+
+    public function addReview(array $data): void
+    {
+        $this->requireAuth();
+
+        $subjectType = trim($data['subjectType'] ?? '');
+        $rating = (int) ($data['rating'] ?? 0);
+        $comment = trim($data['comment'] ?? '');
+        $subjectId = $subjectType === 'site' ? 'site' : trim((string) ($data['subjectId'] ?? ''));
+
+        if (!in_array($subjectType, ['product', 'collection', 'site'], true)) {
+            $this->consoleLog(['error' => 'Invalid subject type'], 400);
+        }
+
+        if (!$this->check_required_fields(['subjectId', 'rating', 'comment'], [
+            'subjectId' => $subjectId, 'rating' => $rating, 'comment' => $comment,
+        ])) return;
+
+        if ($rating < 1 || $rating > 5) {
+            $this->consoleLog(['error' => 'Rating must be between 1 and 5'], 400);
+        }
+
+        $db = Database::getInstance();
+        $con = $db->connect();
+
+        if ($subjectType === 'product') {
+            if (!$this->fetchCol($con, 'products', ['id' => $subjectId], ['id'])) {
+                $this->consoleLog(['error' => 'Product not found'], 404);
+            }
+
+            $purchased = $con->prepare("
+                SELECT 1 FROM order_items oi
+                JOIN orders o ON o.id = oi.order_id
+                WHERE o.user_id = ? AND oi.product_id = ? AND o.payment_status = 'success'
+                LIMIT 1
+            ");
+            $purchased->execute([$this->userLoad['id'], $subjectId]);
+
+            if (!$purchased->fetch()) {
+                $this->consoleLog(['error' => 'You can only review products you have purchased'], 403);
+            }
+        } elseif ($subjectType === 'collection') {
+            if (!$this->fetchCol($con, 'collections', ['id' => $subjectId], ['id'])) {
+                $this->consoleLog(['error' => 'Collection not found'], 404);
+            }
+        }
+
+        $id = $this->generateUniqueId($con, 'rev_', 'reviews');
+
+        try {
+            $this->dbInsert($con, 'reviews', [
+                'id' => $id,
+                'user_id' => $this->userLoad['id'],
+                'subject_type' => $subjectType,
+                'subject_id' => $subjectId,
+                'rating' => $rating,
+                'comment' => $comment,
+            ]);
+        } catch (PDOException $e) {
+            if ((int) $e->getCode() === 23000 || $e->getCode() === '23000') {
+                $this->consoleLog(['error' => 'You have already reviewed this'], 409);
+            }
+            throw $e;
+        }
+
+        $stmt = $con->prepare("
+            SELECT r.*, u.name AS user_name FROM reviews r JOIN users u ON u.id = r.user_id WHERE r.id = ?
+        ");
+        $stmt->execute([$id]);
+
+        $this->consoleLog($this->mapReviewRow($stmt->fetch(PDO::FETCH_ASSOC)), 201);
+    }
+
+    public function deleteReview(string $id): void
+    {
+        $this->requireAuth();
+
+        $db = Database::getInstance();
+        $con = $db->connect();
+
+        $owner = $this->fetchCol($con, 'reviews', ['id' => $id], ['user_id']);
+
+        if (!$owner) {
+            $this->consoleLog(['error' => 'Review not found'], 404);
+        }
+
+        $isStaff = in_array($this->userLoad['role'] ?? null, ['admin', 'staff'], true);
+
+        if (!$isStaff && $owner !== $this->userLoad['id']) {
+            $this->consoleLog(['error' => 'Forbidden'], 403);
+        }
+
+        $deleted = $this->dbDelete($con, 'reviews', ['id' => $id]);
+
+        $this->consoleLog(['id' => $id, 'deleted' => $deleted]);
+    }
+    // == REVIEWS ==
 }
